@@ -1,5 +1,5 @@
 # Face-Mask-CNN
-[Demo Video](https://drive.google.com/file/d/1nxTWB68kNG_tdnEDn0tow9uvI8tJKNOu/view?usp=sharing)
+[Demo Video]([https://drive.google.com/file/d/1nxTWB68kNG_tdnEDn0tow9uvI8tJKNOu/view?usp=sharing](https://youtu.be/01qaPzLxGEE))
 
 I used a kaggle dataset to make a cnn classifer on mask vs no mask wearing people. 
 I used 2 convolution layers, first had 32 channels and the second had 64. 
