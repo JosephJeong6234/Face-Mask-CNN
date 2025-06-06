@@ -2,7 +2,8 @@
 
 ## 🎥 Demo Video
 
-https://raw.githubusercontent.com/JosephJeong6234/Face-Mask-CNN/main/facecnndemo.mp4
+https://github.com/user-attachments/assets/950caab5-dc89-40cd-baca-5cdca1b240ff
+
 
 I used a Kaggle dataset to make a CNN classifier for detecting whether people are wearing masks.
 
