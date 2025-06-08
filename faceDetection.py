@@ -93,8 +93,8 @@ def modelTraining(numEpochs):
             running_loss += loss.item()
         print(f"Epoch {epoch+1}/{numEpochs}, Loss: {running_loss/len(train_loader):.4f}")
         
-#modelTraining(5) #5 epochs is standard apparently
-model.load_state_dict(torch.load("face_mask_cnn.pth", map_location=torch.device("cpu")))
+modelTraining(5) #5 epochs is standard apparently
+#model.load_state_dict(torch.load("face_mask_cnn.pth", map_location=torch.device("cpu"))) #this is if I want to skip training and just evaluate
 
 def modelOfflineEvaluation(save=True):
     model.eval()
