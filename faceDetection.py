@@ -6,6 +6,7 @@ from torchvision import datasets, transforms
 import os
 from PIL import Image
 import numpy as np
+import cv2 as cv
 #source venv/bin/activate to activate venv
 
 # Download latest version #(provided by the kaggle thing)
@@ -104,8 +105,6 @@ def modelOfflineEvaluation(save=True):
     if save:
         torch.save(model.state_dict(), "face_mask_cnn.pth")
 
-import cv2 as cv
-
 def squareResizePrep(frame):
     #0 is height, 1 is width
     diff = abs(frame.shape[0] - frame.shape[1]) #how much we need to pad 
@@ -146,11 +145,11 @@ def modelOnlineEvaluation(cameraNum=0):
             #predict
             outputs = model(frame)
             unneededMaxValues, predicted = torch.max(outputs.data, 1)
-            class_label = "Without Mask" if predicted.item() == 0 else "With Mask"
+            class_label = "Without Mask" if predicted.item() == 1 else "With Mask"
             print(f"Predicted class is {class_label}")
 
             #show what the camera sees 
-            display_frame = frame.squeeze(0).permute(1, 2, 0).cpu().numpy().astype(np.uint8)
+            display_frame = (frame.squeeze(0).permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
             display_frame = cv.cvtColor(display_frame, cv.COLOR_RGB2BGR)
             cv.imshow("Live Video", display_frame)
             if cv.waitKey(10) & 0xFF == ord('q'):
@@ -164,4 +163,4 @@ def modelEval(offline=True, save=True, cameraNum=0):
         modelOfflineEvaluation(save)
     else:
         modelOnlineEvaluation(cameraNum)
-modelEval(offline=True, save=True, cameraNum=0) #change to offline=True to do test dataset
+modelEval(offline=False, save=True, cameraNum=0) #change to offline=True to do test dataset
