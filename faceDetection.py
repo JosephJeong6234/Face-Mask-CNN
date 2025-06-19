@@ -4,7 +4,8 @@ from torch import nn
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 import os
-
+from PIL import Image
+import numpy as np
 #source venv/bin/activate to activate venv
 
 # Download latest version #(provided by the kaggle thing)
@@ -46,30 +47,22 @@ class FaceMaskCNN(nn.Module):
         self.conv1 = nn.Conv2d(3, 32, kernel_size=3, padding=1) #3 color channels to 32 which is apparently standard
         self.pool = nn.MaxPool2d(2, 2)
         self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
-        self.fc1 = nn.Linear(64 * 32 * 32, 128)  #64 channels * the size of the image being 32*32 from the pool in the forward (pooled twice one here and one out in forward)
-        self.fc2 = nn.Linear(128, num_classes)
+        self.fc1 = nn.Linear(128 * 16 * 16, 256)  #num channels * width and height, ori is 128 but pool 3 times so divide by 8 for dimensions, doubling channels each time so
+        self.fc2 = nn.Linear(256, 128) 
+        self.fc3 = nn.Linear(128, num_classes)  
         self.relu = nn.ReLU() #as causes problems when doing nn.ReLu on the x normally in forward
+        self.conv3 = nn.Conv2d(64, 128, kernel_size=3, padding=1) #added this layer to try and improve accuracy for online eval 
 
     def forward(self, x):
         x = self.pool(self.relu(self.conv1(x)))  # -> [batch, 32, 64, 64]
         x = self.pool(self.relu(self.conv2(x)))  # -> [batch, 64, 32, 32]
-        x = x.view(-1, 64 * 32 * 32) #reshape to batchsize of 32 by channel*width*height
+        x = self.pool(self.relu(self.conv3(x))) #128 channels, 16 by 16 
+        x = x.view(-1, 128 * 16 * 16) #reshape to batchsize to match fc1's expected channel*width*height
         x = self.relu(self.fc1(x))
         x = self.fc2(x)
+        x = self.fc3(x)
         return x
-    
-    """def __init__(self): #1 layer is way too inconsistent so changed to 2
-        super().__init__()
-        self.conv1 = nn.Conv2d(3, 32, kernel_size=3, padding=1) #3 color channels to 32 which is apparently standard
-        self.pool = nn.MaxPool2d(2, 2)
-        self.fc1 = nn.Linear(32 * 64 * 64, 128)  #number of channels channels * the size of the image 
-        self.relu = nn.ReLU() #as causes problems when doing nn.ReLu on the x normally in forward
 
-    def forward(self, x):
-        x = self.pool(self.relu(self.conv1(x))) 
-        x = x.view(-1, 32 * 64 * 64)
-        x = self.relu(self.fc1(x))
-        return x"""
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -93,8 +86,8 @@ def modelTraining(numEpochs):
             running_loss += loss.item()
         print(f"Epoch {epoch+1}/{numEpochs}, Loss: {running_loss/len(train_loader):.4f}")
         
-modelTraining(5) #5 epochs is standard apparently
-#model.load_state_dict(torch.load("face_mask_cnn.pth", map_location=torch.device("cpu"))) #this is if I want to skip training and just evaluate
+#modelTraining(5) #5 epochs is standard apparently
+model.load_state_dict(torch.load("face_mask_cnn.pth", map_location=torch.device("cpu")))
 
 def modelOfflineEvaluation(save=True):
     model.eval()
@@ -112,38 +105,57 @@ def modelOfflineEvaluation(save=True):
         torch.save(model.state_dict(), "face_mask_cnn.pth")
 
 import cv2 as cv
+
+def squareResizePrep(frame):
+    #0 is height, 1 is width
+    diff = abs(frame.shape[0] - frame.shape[1]) #how much we need to pad 
+    if frame.shape[0] > frame.shape[1]: #if height taller than width, so pad sides
+        left = diff//2 #half on left
+        right = diff - left #go diff forward to make "equal" length then go back left to center
+        return cv.copyMakeBorder(frame,0,0,left,right,cv.BORDER_CONSTANT,value=[0,0,0]) #add black border to make square
+    else: #if width wider than height, so pad top and bottom
+        top = diff//2 #half on top
+        bottom = diff - top #same logic as first case 
+        return cv.copyMakeBorder(frame,top,bottom,0,0,cv.BORDER_CONSTANT,value=[0,0,0])
+
 def modelOnlineEvaluation(cameraNum=0):
-    cap = cv.VideoCapture(cameraNum) #assume is capturing from some camera that exists
+    cap = cv.VideoCapture(cameraNum)
     if not cap.isOpened():
         print("Cannot open camera")
-        exit()
-    while True:
-        # Capture frame-by-frame
-        ret, frame = cap.read()
+        return
     
-        # if frame is read correctly ret is True
-        if not ret:
-            print("Can't receive frame (stream end?). Exiting ...")
-            break
-        
-        #Actual frame ops here
-        model.eval() #otherwise we start changing the model
-        
-        frame = cv.cvtColor(frame, cv.COLOR_BGR2RGB)  #Convert BGR to RGB
-        frame = cv.resize(frame, (128, 128))  #Resize to match model input size
-        frame = torch.tensor(frame, dtype=torch.float32).permute(2, 0, 1)  #Convert to tensor and change shape to [channel, height, width]
-        frame = frame.unsqueeze(0)  #Add batch dimension
-        outputs = model(frame)
-        outputs = outputs.to(device)  #Ensure outputs are on the same device as the model
-        uneededMaxValues, predicted = torch.max(outputs.data, 1)
-        predicted = (lambda x: "Without Mask" if x == 0 else "With Mask")(predicted.item()) #convert to string
-        print(f"Predicted class is {predicted}")
+    transform = transforms.Compose([
+        transforms.Resize((128, 128)),
+        transforms.ToTensor()
+    ])
+    
+    model.eval() #so we can use the model
+    with torch.no_grad(): #not changing the weights
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                print("Can't receive frame (stream end?). Exiting ...")
+                break
 
-        cv.imshow("Live Video", cv.cvtColor(frame.squeeze(0).permute(1, 2, 0).byte().numpy(), cv.COLOR_RGB2BGR)) #so that the waitkey actually works as otherwise pressing q does nothing 
-        if cv.waitKey(1) & 0xFF == ord('q'):
-            break
-    
-    #When everything done, release the capture
+            #frame prep
+            frame = cv.cvtColor(frame, cv.COLOR_BGR2RGB)
+            frame = squareResizePrep(frame)
+            frame = Image.fromarray(frame)  # convert to PIL for transforms
+            frame = transform(frame).unsqueeze(0).to(device)
+
+            #predict
+            outputs = model(frame)
+            unneededMaxValues, predicted = torch.max(outputs.data, 1)
+            class_label = "Without Mask" if predicted.item() == 0 else "With Mask"
+            print(f"Predicted class is {class_label}")
+
+            #show what the camera sees 
+            display_frame = frame.squeeze(0).permute(1, 2, 0).cpu().numpy().astype(np.uint8)
+            display_frame = cv.cvtColor(display_frame, cv.COLOR_RGB2BGR)
+            cv.imshow("Live Video", display_frame)
+            if cv.waitKey(10) & 0xFF == ord('q'):
+                break
+
     cap.release()
     cv.destroyAllWindows()
 
@@ -152,4 +164,4 @@ def modelEval(offline=True, save=True, cameraNum=0):
         modelOfflineEvaluation(save)
     else:
         modelOnlineEvaluation(cameraNum)
-modelEval(offline=False, save=True, cameraNum=0) #change to offline=True to do test dataset
+modelEval(offline=True, save=True, cameraNum=0) #change to offline=True to do test dataset
