@@ -19,17 +19,30 @@ test_dir = os.path.join(path, "Face Mask Dataset", "Test")
 train_dir = os.path.join(path, "Face Mask Dataset", "Train")
 val_dir = os.path.join(path, "Face Mask Dataset", "Validation")
 
-def transformProcess(directory):
-    transform = transforms.Compose([
-        transforms.Resize((128, 128)),
-        transforms.ToTensor()
-    ])
+def transformProcess(directory, train=True):
+    if train:
+        transform = transforms.Compose([
+            transforms.Resize((140, 140)),                    # Slight upscale before crop
+            transforms.RandomResizedCrop(128, scale=(0.9, 1.0)),  # Slight crop jitter, keep most of the face
+            transforms.RandomHorizontalFlip(p=0.5),           # Faces are usually symmetric
+            transforms.RandomRotation(degrees=10),            # Small rotation is okay
+            transforms.ColorJitter(brightness=0.2, contrast=0.2),  # Subtle lighting changes
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+        ])
+    else:
+        transform = transforms.Compose([
+            transforms.Resize((128, 128)),                    # Keep test images consistent
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+        ])
+
     dataset = datasets.ImageFolder(root=directory, transform=transform)
     return dataset
 
-test_dataset  = transformProcess(test_dir)
-train_dataset = transformProcess(train_dir)
-val_dataset   = transformProcess(val_dir)
+test_dataset  = transformProcess(test_dir, train=False)
+train_dataset = transformProcess(train_dir, train=True)
+val_dataset   = transformProcess(val_dir, train=False)
 
 def loader(dataset, batchSize, shuffleStatus):
     return DataLoader(dataset, batch_size=batchSize, shuffle=shuffleStatus)
@@ -50,7 +63,7 @@ class FaceMaskCNN(nn.Module):
         self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
         self.fc1 = nn.Linear(128 * 16 * 16, 256)  #num channels * width and height, ori is 128 but pool 3 times so divide by 8 for dimensions, doubling channels each time so
         self.fc2 = nn.Linear(256, 128) 
-        self.fc3 = nn.Linear(128, num_classes)  
+        self.fc3 = nn.Linear(128, num_classes)
         self.relu = nn.ReLU() #as causes problems when doing nn.ReLu on the x normally in forward
         self.conv3 = nn.Conv2d(64, 128, kernel_size=3, padding=1) #added this layer to try and improve accuracy for online eval 
 
@@ -87,8 +100,8 @@ def modelTraining(numEpochs):
             running_loss += loss.item()
         print(f"Epoch {epoch+1}/{numEpochs}, Loss: {running_loss/len(train_loader):.4f}")
         
-#modelTraining(5) #5 epochs is standard apparently
-model.load_state_dict(torch.load("face_mask_cnn.pth", map_location=torch.device("cpu")))
+modelTraining(5) #5 epochs is standard apparently
+#model.load_state_dict(torch.load("face_mask_cnn.pth", map_location=torch.device("cpu")))
 
 def modelOfflineEvaluation(save=True):
     model.eval()
@@ -98,7 +111,7 @@ def modelOfflineEvaluation(save=True):
         for images, labels in test_loader:
             images, labels = images.to(device), labels.to(device)
             outputs = model(images)
-            uneededMaxValues, predicted = torch.max(outputs.data, 1)
+            _, predicted = torch.max(outputs.data, 1)
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
     print(f"Test Accuracy: {100 * correct / total:.2f}%")
@@ -125,7 +138,8 @@ def modelOnlineEvaluation(cameraNum=0):
     
     transform = transforms.Compose([
         transforms.Resize((128, 128)),
-        transforms.ToTensor()
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
     ])
     
     model.eval() #so we can use the model
@@ -144,7 +158,7 @@ def modelOnlineEvaluation(cameraNum=0):
 
             #predict
             outputs = model(frame)
-            unneededMaxValues, predicted = torch.max(outputs.data, 1)
+            _, predicted = torch.max(outputs.data, 1)
             class_label = "Without Mask" if predicted.item() == 1 else "With Mask"
             print(f"Predicted class is {class_label}")
 
@@ -163,4 +177,4 @@ def modelEval(offline=True, save=True, cameraNum=0):
         modelOfflineEvaluation(save)
     else:
         modelOnlineEvaluation(cameraNum)
-modelEval(offline=False, save=True, cameraNum=0) #change to offline=True to do test dataset
+modelEval(offline=True, save=True, cameraNum=0) #change to offline=True to do test dataset
