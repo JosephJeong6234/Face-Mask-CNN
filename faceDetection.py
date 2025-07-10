@@ -22,7 +22,7 @@ val_dir = os.path.join(path, "Face Mask Dataset", "Validation")
 def transformProcess(directory, train=True):
     if train:
         transform = transforms.Compose([
-            transforms.Resize((140, 140)),                    # Slight upscale before crop
+            transforms.Resize((140, 140)), # Slight upscale before crop
             transforms.RandomResizedCrop(128, scale=(0.9, 1.0)),  # Slight crop jitter, keep most of the face
             transforms.RandomHorizontalFlip(p=0.5),           # Faces are usually symmetric
             transforms.RandomRotation(degrees=10),            # Small rotation is okay
@@ -90,15 +90,32 @@ def modelTraining(numEpochs):
         running_loss = 0.0
         for images, labels in train_loader:
             images, labels = images.to(device), labels.to(device)
-
             optimizer.zero_grad()
             outputs = model(images)
             loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
-
             running_loss += loss.item()
-        print(f"Epoch {epoch+1}/{numEpochs}, Loss: {running_loss/len(train_loader):.4f}")
+        
+        # Validation phase (evaluate on val_loader)
+        model.eval()
+        val_loss = 0.0
+        correct = 0
+        total = 0
+        with torch.no_grad():
+            for val_images, val_labels in val_loader:
+                val_images, val_labels = val_images.to(device), val_labels.to(device)
+                outputs = model(val_images)
+                loss = criterion(outputs, val_labels)
+                val_loss += loss.item()
+                _, predicted = torch.max(outputs.data, 1)
+                total += val_labels.size(0)
+                correct += (predicted == val_labels).sum().item()
+
+        print(f"Epoch {epoch+1}/{numEpochs}, "
+              f"Train Loss: {running_loss/len(train_loader):.4f}, "
+              f"Val Loss: {val_loss/len(val_loader):.4f}, "
+              f"Val Acc: {100 * correct / total:.2f}%")
         
 modelTraining(5) #5 epochs is standard apparently
 #model.load_state_dict(torch.load("face_mask_cnn.pth", map_location=torch.device("cpu")))
@@ -118,7 +135,7 @@ def modelOfflineEvaluation(save=True):
     if save:
         torch.save(model.state_dict(), "face_mask_cnn.pth")
 
-def squareResizePrep(frame):
+def letterboxing(frame):
     #0 is height, 1 is width
     diff = abs(frame.shape[0] - frame.shape[1]) #how much we need to pad 
     if frame.shape[0] > frame.shape[1]: #if height taller than width, so pad sides
@@ -152,7 +169,7 @@ def modelOnlineEvaluation(cameraNum=0):
 
             #frame prep
             frame = cv.cvtColor(frame, cv.COLOR_BGR2RGB)
-            frame = squareResizePrep(frame)
+            frame = letterboxing(frame)
             frame = Image.fromarray(frame)  # convert to PIL for transforms
             frame = transform(frame).unsqueeze(0).to(device)
 
